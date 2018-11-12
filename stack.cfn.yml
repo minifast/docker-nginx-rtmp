@@ -388,6 +388,11 @@ Resources:
           IpProtocol: tcp
           FromPort: !Ref IngressPort
           ToPort: !Ref IngressPort
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 1
+          ToPort: 65535
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-SecurityGroup"
