@@ -56,9 +56,7 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
   && apk add --no-cache --virtual .build-deps \
     build-base \
     ca-certificates \
-    coreutils \
     curl \
-    ffmpeg \
     gcc \
     gd-dev \
     geoip-dev \
@@ -144,7 +142,10 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
   \
   # Bring in tzdata so users could set the timezones through the environment
   # variables
-  && apk add --no-cache tzdata \
+  && apk add --no-cache \
+    tzdata \
+    coreutils \
+    ffmpeg \
   \
   # forward request and error logs to docker log collector
   && ln -sf /dev/stdout /var/log/nginx/access.log \
@@ -155,8 +156,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx.vh.default.conf /etc/nginx/conf.d/default.conf
 COPY nginx.rtmp.conf /etc/nginx/conf.d/rtmp.conf
 
-EXPOSE 1935
-EXPOSE 80
+EXPOSE 1935 80
 
 STOPSIGNAL SIGTERM
 
