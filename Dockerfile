@@ -155,6 +155,7 @@ COPY nginx.vh.default.conf /etc/nginx/conf.d/default.conf
 COPY nginx.rtmp.conf /etc/nginx/conf.d/rtmp.conf
 
 EXPOSE 1935
+EXPOSE 80
 
 STOPSIGNAL SIGTERM
 
