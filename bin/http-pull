@@ -1,0 +1,33 @@
+#!/bin/bash
+
+set -ex
+
+INPUT_FLAGS="-re"
+OUTPUT_FLAGS="-c copy"
+
+function on_die() {
+  pkill -KILL -P $$
+}
+
+function urldecode() {
+  local without_plus=${*//+/ }
+  printf '%b' ${without_plus//%/\\x}
+}
+
+function overencode() {
+  printf '%b' "${*//%/%25}"
+}
+
+function http_to_rtmp() {
+  RTMP_NAME=$1
+  DECODED_RTMP_NAME=$(urldecode $RTMP_NAME)
+  OVERENCODED_RTMP_NAME=$(overencode $RTMP_NAME)
+  echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/http/${OVERENCODED_RTMP_NAME}"
+}
+
+if [ $(basename "${0}") = "http-pull" ]
+then
+  trap 'on_die' TERM
+  ffmpeg $(http_to_rtmp $1) &
+  wait
+fi

@@ -1,0 +1,33 @@
+#!/bin/bash
+
+set -ex
+
+INPUT_FLAGS="-fflags nobuffer -flags low_delay -rtsp_transport tcp -r 30"
+OUTPUT_FLAGS="-c copy -shortest -probesize 32"
+
+function on_die() {
+  pkill -KILL -P $$
+}
+
+function urldecode() {
+  local without_plus=${*//+/ }
+  printf '%b' ${without_plus//%/\\x}
+}
+
+function overencode() {
+  printf '%b' "${*//%/%25}"
+}
+
+function rtsp_to_rtmp() {
+  RTMP_NAME=$1
+  DECODED_RTMP_NAME=$(urldecode $RTMP_NAME)
+  OVERENCODED_RTMP_NAME=$(overencode $RTMP_NAME)
+  echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp/${OVERENCODED_RTMP_NAME}"
+}
+
+if [ $(basename "${0}") = "rtsp-pull" ]
+then
+  trap 'on_die' TERM
+  ffmpeg $(rtsp_to_rtmp $1) &
+  wait
+fi
