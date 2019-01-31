@@ -3,7 +3,7 @@
 set -ex
 
 INPUT_FLAGS="-fflags nobuffer -flags low_delay -strict experimental -rtsp_transport tcp -r 30"
-OUTPUT_FLAGS="-c:v copy -c:a aac"
+OUTPUT_FLAGS="-c:v copy -c:a aac -ar 44100"
 
 function on_die() {
   pkill -KILL -P $$
@@ -22,7 +22,11 @@ function rtsp_to_rtmp() {
   RTMP_NAME=$1
   DECODED_RTMP_NAME=$(urldecode $RTMP_NAME)
   OVERENCODED_RTMP_NAME=$(overencode $RTMP_NAME)
-  echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp/${OVERENCODED_RTMP_NAME}"
+  if [[ $DECODED_RTMP_NAME == *"^"* ]]; then
+    echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME%^*}" -stream_loop -1 -i "${DECODED_RTMP_NAME#*^}" -map 0:v -map 1:a ${OUTPUT_FLAGS} -shortest -f flv "rtmp://localhost/rtsp/${OVERENCODED_RTMP_NAME}"
+  else
+    echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp/${OVERENCODED_RTMP_NAME}"
+  fi
 }
 
 if [ $(basename "${0}") = "rtsp-pull" ]
