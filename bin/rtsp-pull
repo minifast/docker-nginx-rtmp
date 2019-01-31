@@ -2,8 +2,8 @@
 
 set -ex
 
-INPUT_FLAGS="-fflags nobuffer -probesize 32 -flags low_delay -rtsp_transport tcp -r 30"
-OUTPUT_FLAGS="-movflags +faststart -c copy -shortest -probesize 32"
+INPUT_FLAGS="-fflags nobuffer -flags low_delay -strict experimental -rtsp_transport tcp -r 30"
+OUTPUT_FLAGS="-c:v copy -c:a aac"
 
 function on_die() {
   pkill -KILL -P $$
