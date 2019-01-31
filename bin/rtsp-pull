@@ -2,7 +2,7 @@
 
 set -ex
 
-INPUT_FLAGS="-fflags nobuffer -flags low_delay -rtsp_transport tcp -r 30"
+INPUT_FLAGS="-fflags nobuffer -probesize 32 -flags low_delay -rtsp_transport tcp -r 30"
 OUTPUT_FLAGS="-movflags +faststart -c copy -shortest -probesize 32"
 
 function on_die() {
