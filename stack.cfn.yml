@@ -488,6 +488,7 @@ Resources:
                   - $(aws ecr get-login --no-include-email)
               build:
                 commands:
+                  - cd spec && chmod +x ./roundup.sh && ./roundup.sh && cd ..
                   - docker build --tag $REPOSITORY_URI:$TAG .
               post_build:
                 commands:
