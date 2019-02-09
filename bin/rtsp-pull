@@ -16,32 +16,46 @@ function overencode() {
 }
 
 function rtsp_to_rtmp() {
-  RTMP_NAME=$1
-  FRAME_RATE=$2
-  SKIP_OVERENCODE=$3
-  DECODED_RTMP_NAME=$(urldecode $RTMP_NAME)
+  SOURCE=$1
+  DESTINATION_NAME=$2
+  FRAME_RATE=$3
+  AUDIO_SOURCE=$4
+  INPUT_FLAGS="-use_wallclock_as_timestamps 1 -probesize 32 -fflags nobuffer -flags low_delay -rtsp_transport tcp -r ${FRAME_RATE}"
+  OUTPUT_FLAGS="-movflags +faststart -shortest -fflags +genpts -c:v copy -c:a aac -ac 2 -ar 44100 -ab 128k"
+  AUDIO_INPUT_FLAGS="-use_wallclock_as_timestamps 1 -stream_loop -1 -probesize 32 -fflags nobuffer -flags low_delay"
+  AUDIO_OUTPUT_FLAGS="-map 0:v -map 1:a"
 
-  if [ -z "${SKIP_OVERENCODE}" ]
+  if [ -z "$AUDIO_SOURCE" ]
   then
-    OVERENCODED_RTMP_NAME=$(overencode $RTMP_NAME)
+    echo ${INPUT_FLAGS} -i "${SOURCE}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp-${FRAME_RATE}/${DESTINATION_NAME}"
   else
-    OVERENCODED_RTMP_NAME=$RTMP_NAME
-  fi
-
-  INPUT_FLAGS="-fflags nobuffer -flags low_delay -strict experimental -rtsp_transport tcp -r ${FRAME_RATE}"
-  OUTPUT_FLAGS="-c:v copy -c:a aac -ar 44100"
-
-  if [[ $DECODED_RTMP_NAME == *"^"* ]]
-  then
-    echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME%^*}" -stream_loop -1 -i "${DECODED_RTMP_NAME#*^}" -map 0:v -map 1:a ${OUTPUT_FLAGS} -shortest -f flv "rtmp://localhost/rtsp-${FRAME_RATE}/${OVERENCODED_RTMP_NAME}"
-  else
-    echo ${INPUT_FLAGS} -i "${DECODED_RTMP_NAME}" ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp-${FRAME_RATE}/${OVERENCODED_RTMP_NAME}"
+    echo ${INPUT_FLAGS} -i "${SOURCE}" ${AUDIO_INPUT_FLAGS} -i "${AUDIO_SOURCE}" ${AUDIO_OUTPUT_FLAGS} ${OUTPUT_FLAGS} -f flv "rtmp://localhost/rtsp-${FRAME_RATE}/${DESTINATION_NAME}"
   fi
 }
 
 if [ $(basename "${0}") = "rtsp-pull" ]
 then
   trap 'on_die' TERM
-  ffmpeg $(rtsp_to_rtmp $1 $2 $3) &
+  DESTINATION_NAME=$1
+  SOURCE=$(urldecode $DESTINATION_NAME)
+  FRAME_RATE=$2
+  SKIP_OVERENCODE=$3
+
+  [ -z "${SKIP_OVERENCODE}" ] && DESTINATION_NAME=$(overencode $DESTINATION_NAME)
+
+  if [[ $SOURCE == *"^"* ]]
+  then
+    AUDIO_SOURCE="${SOURCE#*^}"
+    SOURCE="${SOURCE%^*}"
+    if [[ $AUDIO_SOURCE == "http"* ]]
+    then
+      curl -s "${AUDIO_SOURCE}" -o "/tmp/${DESTINATION_NAME}"
+      AUDIO_SOURCE="/tmp/${DESTINATION_NAME}"
+    fi
+    ffmpeg $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE $AUDIO_SOURCE) &
+  else
+    ffmpeg $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE) &
+  fi
+
   wait
 fi
