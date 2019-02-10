@@ -146,11 +146,10 @@ RUN GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8 \
     tzdata \
     coreutils \
     ffmpeg \
-    bash
-
-# forward request and error logs to docker log collector
-RUN ln -sf /dev/stdout /var/log/nginx/access.log
-RUN ln -sf /dev/stdout /var/log/nginx/error.log
+    bash \
+  # forward request and error logs to docker log collector
+  && ln -sf /dev/stdout /var/log/nginx/access.log \
+  && ln -sf /dev/stderr /var/log/nginx/error.log
 
 COPY bin/rtsp-pull /usr/local/bin/rtsp-pull
 COPY bin/http-pull /usr/local/bin/http-pull

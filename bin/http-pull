@@ -1,9 +1,10 @@
 #!/bin/bash
 
-set -ex
+set -e
 
 INPUT_FLAGS="-re"
 OUTPUT_FLAGS="-c copy"
+FFMPEG_FLAGS="-hide_banner -nostats -thread_queue_size 512"
 
 function on_die() {
   pkill -KILL -P $$
@@ -28,6 +29,6 @@ function http_to_rtmp() {
 if [ $(basename "${0}") = "http-pull" ]
 then
   trap 'on_die' TERM
-  ffmpeg $(http_to_rtmp $1) &
+  ffmpeg ${FFMPEG_FLAGS} $(http_to_rtmp $1) &
   wait
 fi

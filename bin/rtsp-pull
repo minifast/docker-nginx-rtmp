@@ -1,6 +1,8 @@
 #!/bin/bash
 
-set -ex
+set -e
+
+FFMPEG_FLAGS="-hide_banner -nostats -thread_queue_size 512"
 
 function on_die() {
   pkill -KILL -P $$
@@ -20,9 +22,9 @@ function rtsp_to_rtmp() {
   DESTINATION_NAME=$2
   FRAME_RATE=$3
   AUDIO_SOURCE=$4
-  INPUT_FLAGS="-use_wallclock_as_timestamps 1 -probesize 32 -fflags nobuffer -flags low_delay -rtsp_transport tcp -r ${FRAME_RATE}"
-  OUTPUT_FLAGS="-movflags +faststart -shortest -fflags +genpts -c:v copy -c:a aac -ac 2 -ar 44100 -ab 128k"
-  AUDIO_INPUT_FLAGS="-use_wallclock_as_timestamps 1 -stream_loop -1 -probesize 32 -fflags nobuffer -flags low_delay"
+  INPUT_FLAGS="-fflags nobuffer -fflags +genpts -flags low_delay -rtsp_transport tcp -r ${FRAME_RATE}"
+  OUTPUT_FLAGS="-movflags +faststart -c:v copy -c:a aac -ac 2 -ar 44100 -ab 128k"
+  AUDIO_INPUT_FLAGS="-fflags +igndts -fflags +genpts -stream_loop -1"
   AUDIO_OUTPUT_FLAGS="-map 0:v -map 1:a"
 
   if [ -z "$AUDIO_SOURCE" ]
@@ -49,12 +51,14 @@ then
     SOURCE="${SOURCE%^*}"
     if [[ $AUDIO_SOURCE == "http"* ]]
     then
-      curl -s "${AUDIO_SOURCE}" -o "/tmp/${DESTINATION_NAME}"
+      wget "${AUDIO_SOURCE}" -O "/tmp/${DESTINATION_NAME}"
       AUDIO_SOURCE="/tmp/${DESTINATION_NAME}"
     fi
-    ffmpeg $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE $AUDIO_SOURCE) &
+    set -x
+    ffmpeg ${FFMPEG_FLAGS} $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE $AUDIO_SOURCE) &
   else
-    ffmpeg $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE) &
+    set -x
+    ffmpeg ${FFMPEG_FLAGS} $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE) &
   fi
 
   wait
