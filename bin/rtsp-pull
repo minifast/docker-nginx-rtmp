@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 FFMPEG_FLAGS="-hide_banner -nostats -thread_queue_size 512"
 
@@ -22,8 +22,8 @@ function rtsp_to_rtmp() {
   DESTINATION_NAME=$2
   FRAME_RATE=$3
   AUDIO_SOURCE=$4
-  INPUT_FLAGS="-fflags nobuffer -fflags +genpts -flags low_delay -rtsp_transport tcp -r ${FRAME_RATE}"
-  OUTPUT_FLAGS="-movflags +faststart -c:v copy -c:a aac -ac 2 -ar 44100 -ab 128k"
+  INPUT_FLAGS="-fflags nobuffer -fflags +genpts -fflags +igndts -flags low_delay -rtsp_transport tcp -r ${FRAME_RATE}"
+  OUTPUT_FLAGS="-movflags +faststart -af aresample=resampler=soxr -c:v copy -c:a libfdk_aac -ac 2 -ar 44100 -ab 128k"
   AUDIO_INPUT_FLAGS="-fflags +igndts -fflags +genpts -stream_loop -1"
   AUDIO_OUTPUT_FLAGS="-map 0:v -map 1:a"
 
@@ -49,15 +49,8 @@ then
   then
     AUDIO_SOURCE="${SOURCE#*^}"
     SOURCE="${SOURCE%^*}"
-    if [[ $AUDIO_SOURCE == "http"* ]]
-    then
-      wget "${AUDIO_SOURCE}" -O "/tmp/${DESTINATION_NAME}"
-      AUDIO_SOURCE="/tmp/${DESTINATION_NAME}"
-    fi
-    set -x
     ffmpeg ${FFMPEG_FLAGS} $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE $AUDIO_SOURCE) &
   else
-    set -x
     ffmpeg ${FFMPEG_FLAGS} $(rtsp_to_rtmp $SOURCE $DESTINATION_NAME $FRAME_RATE) &
   fi
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 INPUT_FLAGS="-re"
 OUTPUT_FLAGS="-c copy"
