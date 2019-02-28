@@ -36,7 +36,6 @@ Parameters:
       - true
       - false
 
-
   GitSourceRepo:
     Type: String
     Description: CodeCommit or GitHub source repository - must contain a Dockerfile in the base
@@ -962,43 +961,5 @@ Resources:
 
 Outputs:
   Name:
-    Description: VPC Stack Name
-    Value: !Ref AWS::StackName
-    Export:
-      Name: !Sub ${AWS::StackName}-Name
-
-  VPCId:
-    Description: VPC ID
-    Value: !Ref VPC
-    Export:
-      Name: !Sub "${AWS::StackName}-VpcID"
-
-  VpcCidr:
-    Description: Vpc cidr block
-    Value: !FindInMap [ CIDRMap, VPC, CIDR ]
-    Export:
-      Name: !Sub "${AWS::StackName}-vpc-cidr"
-
-  PublicSubnet1:
-    Description: Public subnet 1 ID
-    Value: !Ref PublicSubnet1
-    Export:
-      Name: !Sub "${AWS::StackName}-PublicSubnet1ID"
-
-  PublicSubnet2:
-    Description: Public subnet 2 ID
-    Value: !Ref PublicSubnet2
-    Export:
-      Name: !Sub "${AWS::StackName}-PublicSubnet2ID"
-
-  PrivateSubnet1:
-    Description: Private subnet 1 ID
-    Value: !Ref PrivateSubnet1
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateSubnet1ID"
-
-  PrivateSubnet2:
-    Description: Private subnet 2 ID
-    Value: !Ref PrivateSubnet2
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateSubnet2ID"
+    Description: DNS Name
+    Value: !GetAtt LoadBalancer.DNSName
