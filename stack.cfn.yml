@@ -963,3 +963,9 @@ Outputs:
   Name:
     Description: DNS Name
     Value: !GetAtt LoadBalancer.DNSName
+  ElasticIP1:
+    Description: Elastic IP 1
+    Value: !Ref NatEIP1
+  ElasticIP2:
+    Description: Elastic IP 2
+    Value: !Ref NatEIP2

@@ -39,6 +39,8 @@ RUN cd /tmp && \
   wget -q https://github.com/arut/nginx-rtmp-module/archive/v${NGINX_RTMP_VERSION}.tar.gz && \
   tar zxf v${NGINX_RTMP_VERSION}.tar.gz && rm v${NGINX_RTMP_VERSION}.tar.gz
 
+RUN sed -i 's/256/1024/g' /tmp/nginx-rtmp-module-${NGINX_RTMP_VERSION}/ngx_rtmp_cmd_module.h
+
 # Compile nginx with nginx-rtmp module.
 RUN cd /tmp/nginx-${NGINX_VERSION} && \
   ./configure \
@@ -155,8 +157,10 @@ COPY --from=build-ffmpeg /usr/lib/libfdk-aac.so.2 /usr/lib/libfdk-aac.so.2
 # Add NGINX config and static files.
 ADD bin/rtsp-pull /usr/local/bin/rtsp-pull
 ADD bin/http-pull /usr/local/bin/http-pull
+ADD bin/ffmpeg-pull /usr/local/bin/ffmpeg-pull
 RUN chmod +x /usr/local/bin/rtsp-pull
 RUN chmod +x /usr/local/bin/http-pull
+RUN chmod +x /usr/local/bin/ffmpeg-pull
 
 ADD nginx.conf /opt/nginx/nginx.conf
 RUN mkdir -p /opt/data && mkdir /www

@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -ex
+
+FFMPEG_FLAGS="-hide_banner -nostats -thread_queue_size 512"
+
+function on_die() {
+  pkill -KILL -P $$
+}
+
+function urldecode() {
+  local without_plus=${*//+/ }
+  printf '%b' ${without_plus//%/\\x}
+}
+
+function overencode() {
+  printf '%b' "${*//%/%25}"
+}
+
+if [ $(basename "${0}") = "ffmpeg-pull" ]
+then
+  trap 'on_die' TERM
+
+  DESTINATION_NAME=$1
+  FLAGS=$(urldecode $DESTINATION_NAME)
+  SKIP_OVERENCODE=$2
+  [ -z "${SKIP_OVERENCODE}" ] && DESTINATION_NAME=$(overencode $DESTINATION_NAME)
+
+  ffmpeg ${FFMPEG_FLAGS} ${FLAGS} -f flv "rtmp://localhost/ffmpeg/${DESTINATION_NAME}" &
+
+  wait
+fi
