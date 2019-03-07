@@ -500,6 +500,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Type: LINUX_CONTAINER
         Image: !Ref CodeBuildDockerImage
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: REPOSITORY_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrDockerRepository}
@@ -518,6 +519,11 @@ Resources:
           - !Ref PrivateSubnet2
         SecurityGroupIds:
           - !Ref CodeBuildSecurityGroup
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE
+          - LOCAL_DOCKER_LAYER_CACHE
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
