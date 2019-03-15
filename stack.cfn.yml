@@ -6,6 +6,8 @@ Description: Dynamically-scalable nginx-rtmp and ffmpeg cluster
 # This VPC stack combines:
 # * https://github.com/aws-samples/startup-kit-templates/blob/master/templates/fargate.cfn.yml
 # * https://github.com/aws-samples/startup-kit-templates/blob/master/templates/vpc.cfn.yml
+# * https://github.com/awslabs/aws-cloudformation-templates/blob/master/aws/services/ECS/EC2LaunchType/clusters/private-vpc.yml
+# * https://github.com/awslabs/aws-cloudformation-templates/blob/master/aws/services/ECS/EC2LaunchType/services/private-service.yml
 # All are licensed under the Apache License 2.0
 Parameters:
 
@@ -25,20 +27,12 @@ Parameters:
     MinValue: 0
     MaxValue: 65535
     ConstraintDescription: TCP ports must be between 0 - 65535
-    Default: 80
-
-  SingleNatGateway:
-    Description: Set to true to only install one NAT gateway
-    Type: String
-    ConstraintDescription: Value must be true or false
-    Default: true
-    AllowedValues:
-      - true
-      - false
+    Default: 1935
 
   GitSourceRepo:
     Type: String
     Description: CodeCommit or GitHub source repository - must contain a Dockerfile in the base
+    Default: docker-nginx-rtmp
 
   GitBranch:
     Type: String
@@ -53,6 +47,7 @@ Parameters:
   GitHubUser:
     Type: String
     Description: GitHub username or organization - leave blank if using CodeCommit
+    Default: minifast
 
   CodeBuildDockerImage:
     Type: String
@@ -66,7 +61,7 @@ Parameters:
   DefaultContainerCpu:
     Type: Number
     Description: "Amount of CPU for the container - options available: https://aws.amazon.com/fargate/pricing/"
-    Default: 256
+    Default: 1024
     MinValue: 256
     MaxValue: 4096
     ConstraintDescription: "Value must be between 256 and 4096 - see: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#task_size"
@@ -74,7 +69,7 @@ Parameters:
   DefaultContainerMemory:
     Type: Number
     Description: "Amount of memory for the container - options available: https://aws.amazon.com/fargate/pricing/"
-    Default: 512
+    Default: 2048
     MinValue: 512
     MaxValue: 30720
     ConstraintDescription: "Value must be between 512 and 30720 - see: https://aws.amazon.com/fargate/pricing/"
@@ -115,6 +110,32 @@ Parameters:
     Default: 2
     MinValue: 1
     ConstraintDescription: Value must be at least one
+
+  DesiredCapacity:
+    Type: Number
+    Default: 1
+    Description: Number of EC2 instances to launch in your ECS cluster.
+
+  MaxSize:
+    Type: Number
+    Default: 6
+    Description: Maximum number of EC2 instances that can be launched in your ECS cluster.
+
+  ECSAMI:
+    Description: AMI ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: c4.xlarge
+    AllowedValues: [t2.micro, t2.small, t2.medium, t2.large, m3.medium, m3.large,
+      m3.xlarge, m3.2xlarge, m4.large, m4.xlarge, m4.2xlarge, m4.4xlarge, m4.10xlarge,
+      c4.large, c4.xlarge, c4.2xlarge, c4.4xlarge, c4.8xlarge, c3.large, c3.xlarge,
+      c3.2xlarge, c3.4xlarge, c3.8xlarge, r3.large, r3.xlarge, r3.2xlarge, r3.4xlarge,
+      r3.8xlarge, i2.xlarge, i2.2xlarge, i2.4xlarge, i2.8xlarge]
+    ConstraintDescription: Please choose a valid instance type.
 
   ContainerLogRetentionInDays:
     Type: Number
@@ -166,10 +187,6 @@ Parameters:
       - true
       - false
 
-Conditions:
-  CreateSingleNatGateway: !Equals [ !Ref SingleNatGateway, true ]
-  CreateMultipleNatGateways: !Not [ Condition: CreateSingleNatGateway ]
-
 Mappings:
 
   # Maps CIDR blocks to VPC and various subnets
@@ -195,7 +212,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:
       - Key: Name
-        Value: !Ref "AWS::StackName"
+        Value: !Ref AWS::StackName
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -304,7 +321,6 @@ Resources:
 
   NatGateway2:
     DependsOn: VPCGatewayAttachment
-    Condition: CreateMultipleNatGateways
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt NatEIP2.AllocationId
@@ -318,7 +334,6 @@ Resources:
 
   NatEIP2:
     DependsOn: VPCGatewayAttachment
-    Condition: CreateMultipleNatGateways
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
@@ -333,7 +348,6 @@ Resources:
 
   NatRouteTable2:
     Type: AWS::EC2::RouteTable
-    Condition: CreateMultipleNatGateways
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -351,7 +365,6 @@ Resources:
   NatRoute2:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
-    Condition: CreateMultipleNatGateways
     Properties:
       RouteTableId: !Ref NatRouteTable2
       DestinationCidrBlock: 0.0.0.0/0
@@ -363,38 +376,192 @@ Resources:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref NatRouteTable1
 
-  PrivateSubnetRouteTableAssociationSingleNatGateway:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: CreateSingleNatGateway
-    Properties:
-      SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref NatRouteTable1
-
   PrivateSubnetRouteTableAssociation2:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: CreateMultipleNatGateways
     Properties:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref NatRouteTable2
 
+  # A security group for the EC2 hosts that will run the containers.
+  # Two rules, allowing network traffic from a public facing load
+  # balancer and from other hosts in the security group.
+  #
+  # Remove any of the following ingress rules that are not needed.
+  # If you want to make direct requests to a container using its
+  # public IP address you'll need to add a security group rule
+  # to allow traffic from all IP addresses.
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      GroupDescription: Access to the ECS hosts that run containers
+      VpcId: !Ref 'VPC'
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the ECS hosts that run containers
       VpcId: !Ref VPC
-      GroupDescription: Ingress security group
       SecurityGroupIngress:
-        - CidrIp: 0.0.0.0/0
-          IpProtocol: tcp
-          FromPort: !Ref IngressPort
-          ToPort: !Ref IngressPort
-      SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
-          IpProtocol: tcp
-          FromPort: 1
+        - IpProtocol: tcp
+          FromPort: 0
           ToPort: 65535
-      Tags:
-      - Key: Name
-        Value: !Sub "${AWS::StackName}-SecurityGroup"
+          CidrIp: '0.0.0.0/0'
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: '0.0.0.0/0'
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+
+  # Role for the EC2 hosts. This allows the ECS agent on the EC2 hosts
+  # to communciate with the ECS control plane, as well as download the docker
+  # images from ECR to run on your host.
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ec2.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'ecs:CreateCluster'
+              - 'ecs:DeregisterContainerInstance'
+              - 'ecs:DiscoverPollEndpoint'
+              - 'ecs:Poll'
+              - 'ecs:RegisterContainerInstance'
+              - 'ecs:StartTelemetrySession'
+              - 'ecs:Submit*'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+              - 'ecr:GetAuthorizationToken'
+              - 'ecr:BatchGetImage'
+              - 'ecr:GetDownloadUrlForLayer'
+            Resource: '*'
+
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs.amazonaws.com]
+            Action: ['sts:AssumeRole']
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                # Rules which allow ECS to attach network interfaces to instances
+                # on your behalf in order for awsvpc networking mode to work right
+                - 'ec2:AttachNetworkInterface'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:CreateNetworkInterfacePermission'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DeleteNetworkInterfacePermission'
+                - 'ec2:Describe*'
+                - 'ec2:DetachNetworkInterface'
+
+                # Rules which allow ECS to update load balancers on your behalf
+                # with the information sabout how to send traffic to your containers
+                - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+                - 'elasticloadbalancing:DeregisterTargets'
+                - 'elasticloadbalancing:Describe*'
+                - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+                - 'elasticloadbalancing:RegisterTargets'
+              Resource: '*'
+        - PolicyName: default-s3-bucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:*
+                Resource: !GetAtt DefaultContainerBucket.Arn
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+
+  # Autoscaling group. This launches the actual EC2 instances that will register
+  # themselves as members of the cluster, and run the docker containers.
+  ECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      LaunchConfigurationName: !Ref ContainerInstances
+      MinSize: '1'
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: 'true'
+
+  ContainerInstances:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn:
+      - EcsCluster
+    Properties:
+      ImageId: !Ref ECSAMI
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          echo ECS_CLUSTER=${EcsCluster} >> /etc/ecs/ecs.config
+          yum install -y aws-cfn-bootstrap
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ECSAutoScalingGroup --region ${AWS::Region}
+
+  AutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'application-autoscaling:*'
+              - 'cloudwatch:DescribeAlarms'
+              - 'cloudwatch:PutMetricAlarm'
+              - 'ecs:DescribeServices'
+              - 'ecs:UpdateService'
+            Resource: '*'
 
   CodeBuildSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -510,7 +677,6 @@ Resources:
             Value: !Ref GitSourceRepo
           - Name: REPOSITORY_BRANCH
             Value: !Ref GitBranch
-      Name: !Ref AWS::StackName
       ServiceRole: !Ref CodeBuildServiceRole
       VpcConfig:
         VpcId: !Ref VPC
@@ -527,6 +693,9 @@ Resources:
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
+    DependsOn:
+      - CodePipelineArtifactBucket
+      - EcsCluster
     Properties:
       Path: /
       AssumeRolePolicyDocument:
@@ -563,15 +732,17 @@ Resources:
                   - s3:GetObject
                   - s3:GetObjectVersion
                   - s3:GetBucketVersioning
-    DependsOn:
-      - CodePipelineArtifactBucket
-      - FargateEcsCluster
 
   # This CodePipeline is used for GitHub based repos. It triggers on a commit to the Git branch passed,
-  # builds the Docker image and then deploys the container in the Fargate Cluster. CodePipeline can support N stages.
+  # builds the Docker image and then deploys the container in the ECS Cluster. CodePipeline can support N stages.
   # For example, you may want to add a stage to test your build and/or container.
   CodePipelineGitHub:
     Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - CodePipelineArtifactBucket
+      - CodeBuildProject
+      - CodePipelineServiceRole
+      - DefaultEcsService
     Properties:
       RoleArn: !GetAtt CodePipelineServiceRole.Arn
       ArtifactStore:
@@ -618,17 +789,12 @@ Resources:
                 Version: 1
                 Provider: ECS
               Configuration:
-                ClusterName: !Ref FargateEcsCluster
-                ServiceName: !GetAtt DefaultFargateService.Name
+                ClusterName: !Ref EcsCluster
+                ServiceName: !GetAtt DefaultEcsService.Name
                 FileName: build.json
               InputArtifacts:
                 - Name: BuildOutput
               RunOrder: 1
-    DependsOn:
-      - CodePipelineArtifactBucket
-      - CodeBuildProject
-      - CodePipelineServiceRole
-      - DefaultFargateService
 
   # Simple Amazon ECR Lifecycle Policies to try and reduce storage costs
   # See: https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html
@@ -668,11 +834,6 @@ Resources:
             MaxTaggedContainerImagesToRetain: !Ref MaxTaggedContainerImagesToRetain
             EnvironmentName: !Ref AWS::StackName
 
-  FargateEcsCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: !Ref AWS::StackName
-
   # The ALB lives in two public subnets. See the existing vpc.cfn.yml stack
   # for ELB/ALB and application security groups which define ingress ports.
   LoadBalancer:
@@ -687,16 +848,16 @@ Resources:
         Value: !Ref AWS::StackName
       - Key: Environment
         Value: !Ref AWS::StackName
-      - Key: FargateCluster
-        Value: !Ref FargateEcsCluster
+      - Key: EcsCluster
+        Value: !Ref EcsCluster
 
   # The health checks can be further tuned if your requirements differ
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancer
     Properties:
       VpcId: !Ref VPC
       Port: !Ref IngressPort
-      TargetType: ip
       Protocol: TCP
       Tags:
       - Key: Repository
@@ -707,10 +868,12 @@ Resources:
         Value: !Ref AWS::StackName
       - Key: Environment
         Value: !Ref AWS::StackName
-    DependsOn: LoadBalancer
 
   LoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+    - TargetGroup
+    - LoadBalancer
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: !Ref IngressPort
@@ -718,37 +881,13 @@ Resources:
       DefaultActions:
       - Type: forward
         TargetGroupArn: !Ref TargetGroup
-    DependsOn:
-    - TargetGroup
-    - LoadBalancer
 
   # The namespace in Amazon CloudWatch Logs - see https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogsConcepts.html
   DefaultLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /fargate/${AWS::StackName}/${GitSourceRepo}/${GitBranch}
+      LogGroupName: !Sub /ecs/${AWS::StackName}/${GitSourceRepo}/${GitBranch}
       RetentionInDays: !Ref ContainerLogRetentionInDays
-
-  DefaultTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: /
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: default-s3-bucket
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: s3:*
-                Resource: !GetAtt DefaultContainerBucket.Arn
-    DependsOn: DefaultContainerBucket
 
   DefaultTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -764,16 +903,19 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  DefaultFargateTaskDefinition:
+  DefaultEcsTaskDefinition:
     Type: AWS::ECS::TaskDefinition
+    DependsOn:
+      - DefaultContainerBucket
+      - DefaultLogGroup
+      - DefaultTaskExecutionRole
     Properties:
       Family: !Ref AWS::StackName
       RequiresCompatibilities:
-        - FARGATE
+        - EC2
       Cpu: !Ref DefaultContainerCpu
       Memory: !Ref DefaultContainerMemory
-      NetworkMode: awsvpc
-      TaskRoleArn: !GetAtt DefaultTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSRole.Arn
       ExecutionRoleArn: !GetAtt DefaultTaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: !Ref GitSourceRepo
@@ -796,34 +938,22 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Ref DefaultLogGroup
               awslogs-stream-prefix: !Ref GitSourceRepo
-    DependsOn:
-      - DefaultContainerBucket
-      - DefaultLogGroup
-      - DefaultTaskExecutionRole
 
-  DefaultFargateService:
+  DefaultEcsService:
     Type: AWS::ECS::Service
+    DependsOn:
+      - EcsCluster
+      - DefaultEcsTaskDefinition
+      - LoadBalancerListener
     Properties:
-      Cluster: !Ref FargateEcsCluster
+      Cluster: !Ref EcsCluster
       DesiredCount: !Ref DefaultTaskMinContainerCount
-      LaunchType: FARGATE
-      TaskDefinition: !Ref DefaultFargateTaskDefinition
+      LaunchType: EC2
+      TaskDefinition: !Ref DefaultEcsTaskDefinition
       LoadBalancers:
         - ContainerName: !Ref GitSourceRepo
           ContainerPort: !Ref IngressPort
           TargetGroupArn: !Ref TargetGroup
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
-          Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-          SecurityGroups:
-            - !Ref SecurityGroup
-    DependsOn:
-      - FargateEcsCluster
-      - DefaultFargateTaskDefinition
-      - LoadBalancerListener
 
   ServiceAutoScalingRole:
     Type: AWS::IAM::Role
@@ -850,22 +980,23 @@ Resources:
 
   DefaultServiceScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn:
+      - DefaultEcsService
+      - ServiceAutoScalingRole
     Properties:
       MinCapacity: !Ref DefaultTaskMinContainerCount
       MaxCapacity: !Ref DefaultTaskMaxContainerCount
       ResourceId: !Sub
         - service/${EcsClusterName}/${EcsDefaultServiceName}
-        - EcsClusterName: !Ref FargateEcsCluster
-          EcsDefaultServiceName: !GetAtt DefaultFargateService.Name
+        - EcsClusterName: !Ref EcsCluster
+          EcsDefaultServiceName: !GetAtt DefaultEcsService.Name
       RoleARN: !GetAtt ServiceAutoScalingRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
-    DependsOn:
-      - DefaultFargateService
-      - ServiceAutoScalingRole
 
   DefaultServiceScaleOutPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: DefaultServiceScalingTarget
     Properties:
       PolicyName: ScaleOutPolicy
       PolicyType: StepScaling
@@ -877,7 +1008,6 @@ Resources:
         StepAdjustments:
           - ScalingAdjustment: 1
             MetricIntervalLowerBound: 0
-    DependsOn: DefaultServiceScalingTarget
 
   DefaultServiceScaleInPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
@@ -896,6 +1026,9 @@ Resources:
 
   DefaultServiceScaleOutAlarm:
     Type: AWS::CloudWatch::Alarm
+    DependsOn:
+      - DefaultEcsService
+      - DefaultServiceScaleOutPolicy
     Properties:
       EvaluationPeriods: !Ref DefaultServiceScaleEvaluationPeriods
       Statistic: Average
@@ -908,17 +1041,17 @@ Resources:
       Namespace: AWS/ECS
       Dimensions:
         - Name: ClusterName
-          Value: !Ref FargateEcsCluster
+          Value: !Ref EcsCluster
         - Name: ServiceName
-          Value: !GetAtt DefaultFargateService.Name
+          Value: !GetAtt DefaultEcsService.Name
       ComparisonOperator: GreaterThanThreshold
       MetricName: CPUUtilization
-    DependsOn:
-      - DefaultFargateService
-      - DefaultServiceScaleOutPolicy
 
   DefaultServiceScaleInAlarm:
     Type: AWS::CloudWatch::Alarm
+    DependsOn:
+      - DefaultEcsService
+      - DefaultServiceScaleInPolicy
     Properties:
       EvaluationPeriods: !Ref DefaultServiceScaleEvaluationPeriods
       Statistic: Average
@@ -931,17 +1064,15 @@ Resources:
       Namespace: AWS/ECS
       Dimensions:
         - Name: ClusterName
-          Value: !Ref FargateEcsCluster
+          Value: !Ref EcsCluster
         - Name: ServiceName
-          Value: !GetAtt DefaultFargateService.Name
+          Value: !GetAtt DefaultEcsService.Name
       ComparisonOperator: LessThanThreshold
       MetricName: CPUUtilization
-    DependsOn:
-      - DefaultFargateService
-      - DefaultServiceScaleInPolicy
 
   LBLatency:
     Type: AWS::CloudWatch::Alarm
+    DependsOn: LoadBalancer
     Properties:
       AlarmDescription: !Sub LB latency is over ${LoadBalancerLatencySeconds} second(s) for ${LoadBalancerAlarmEvaluationPeriods} period(s) of ${LoadBalancerAlarmEvaluationPeriodSeconds} seconds
       TreatMissingData: notBreaching
@@ -958,7 +1089,6 @@ Resources:
       Dimensions:
       - Name: LoadBalancer
         Value: !GetAtt LoadBalancer.LoadBalancerFullName
-    DependsOn: LoadBalancer
 
   LoadBalancerAlarmTopic:
     Type: AWS::SNS::Topic
@@ -966,8 +1096,8 @@ Resources:
       DisplayName: LoadBalancer Alarm Topic
 
 Outputs:
-  Name:
-    Description: DNS Name
+  PublicHostname:
+    Description: Public Hostname
     Value: !GetAtt LoadBalancer.DNSName
   ElasticIP1:
     Description: Elastic IP 1
