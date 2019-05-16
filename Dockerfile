@@ -155,11 +155,7 @@ COPY --from=build-ffmpeg /usr/local /usr/local
 COPY --from=build-ffmpeg /usr/lib/libfdk-aac.so.2 /usr/lib/libfdk-aac.so.2
 
 # Add NGINX config and static files.
-ADD bin/rtsp-pull /usr/local/bin/rtsp-pull
-ADD bin/http-pull /usr/local/bin/http-pull
 ADD bin/ffmpeg-pull /usr/local/bin/ffmpeg-pull
-RUN chmod +x /usr/local/bin/rtsp-pull
-RUN chmod +x /usr/local/bin/http-pull
 RUN chmod +x /usr/local/bin/ffmpeg-pull
 
 ADD nginx.conf /opt/nginx/nginx.conf
